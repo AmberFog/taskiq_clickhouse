@@ -1,0 +1,23 @@
+[flake8]
+max-line-length = 120
+max-line-complexity = 12
+max-cognitive-score = 12
+max-try-body-length = 4
+format = wemake
+select = WPS
+
+# Ruff owns formatting, imports, pyflakes/pycodestyle, docstrings, security,
+# pytest rules and the docs/examples print policy. Wemake remains an additional
+# architecture and complexity smell-check layer for production package code.
+exclude =
+    .git,
+    .mypy_cache,
+    .pytest_cache,
+    .ruff_cache,
+    .venv,
+    build,
+    dist,
+
+per-file-ignores =
+    # The root initializer defines the explicit public API metadata.
+    src/taskiq_clickhouse/__init__.py: WPS410, WPS412

@@ -1,0 +1,78 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-illegal-windows-names
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+      - id: debug-statements
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: name-tests-test
+        args: [--pytest-test-first]
+      - id: pretty-format-json
+        args:
+          - --autofix
+          - --indent=2
+      - id: trailing-whitespace
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.48.0
+    hooks:
+      - id: typos
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.28
+    hooks:
+      - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: check-all-position
+        name: check __all__ position
+        entry: uv run --locked python scripts/check_all_position.py
+        language: system
+        types: [python]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --locked ruff check --fix .
+        language: system
+        files: ^(pyproject\.toml|ruff\.toml|uv\.lock|scripts/.*\.py|src/.*\.pyi?|tests/.*\.pyi?)$
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --locked ruff format .
+        language: system
+        files: ^(pyproject\.toml|ruff\.toml|uv\.lock|scripts/.*\.py|src/.*\.pyi?|tests/.*\.pyi?)$
+        pass_filenames: false
+      - id: wemake
+        name: wemake-python-styleguide
+        entry: uv run --locked flake8 src/taskiq_clickhouse
+        files: ^(\.flake8|pyproject\.toml|uv\.lock|src/taskiq_clickhouse/.*\.py)$
+        language: system
+        pass_filenames: false
+      - id: mypy
+        name: mypy
+        entry: uv run --locked mypy
+        files: ^(pyproject\.toml|uv\.lock|src/taskiq_clickhouse/.*\.pyi?|tests/.*\.pyi?)$
+        language: system
+        pass_filenames: false

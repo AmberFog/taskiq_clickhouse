@@ -1,1 +1,1 @@
-# taskiq_clickhouse
+# taskiq-clickhouse

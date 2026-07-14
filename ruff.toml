@@ -1,0 +1,39 @@
+force-exclude = true
+line-length = 120
+output-format = "grouped"
+target-version = "py311"
+
+[lint]
+select = ["ALL"]
+ignore = [
+    "COM812",
+    "ISC001",
+]
+
+[lint.per-file-ignores]
+"docs/**/*.py" = ["T201"]
+"examples/**/*.py" = ["T201"]
+"scripts/**/*.py" = ["INP001"]
+"tests/**/test_*.py" = ["S101"]
+
+[lint.flake8-builtins]
+strict-checking = true
+
+[lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true
+force-wrap-aliases = true
+lines-after-imports = 2
+
+[lint.mccabe]
+max-complexity = 8
+
+[lint.pydocstyle]
+convention = "pep257"
+ignore-decorators = ["typing.overload"]
+
+[lint.pylint]
+max-args = 5
+max-branches = 10
+max-returns = 5
+max-statements = 40

@@ -1,0 +1,101 @@
+[build-system]
+requires = [
+    "uv_build>=0.11.28,<0.12",
+]
+build-backend = "uv_build"
+
+[project]
+name = "taskiq-clickhouse"
+version = "0.1.0"
+description = "ClickHouse result backend for Taskiq."
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "AMBER FOG" },
+]
+keywords = [
+    "asyncio",
+    "clickhouse",
+    "distributed-tasks",
+    "result-backend",
+    "taskiq",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "clickhouse-connect[async]>=1.4.2,<2",
+    "taskiq>=0.12.4,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/AmberFog/taskiq_clickhouse"
+Issues = "https://github.com/AmberFog/taskiq_clickhouse/issues"
+Repository = "https://github.com/AmberFog/taskiq_clickhouse"
+
+[dependency-groups]
+dev = [
+    "coverage[toml]>=7,<8",
+    "mypy>=2.1,<3",
+    "pre-commit>=4,<5",
+    "pytest>=9,<10",
+    "pytest-asyncio>=1,<2",
+    "pytest-cov>=7,<8",
+    "pytest-timeout>=2,<3",
+    "ruff>=0.15,<0.16",
+    "wemake-python-styleguide>=1.6,<2",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "-ra",
+]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+asyncio_mode = "strict"
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["taskiq_clickhouse"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+files = [
+    "src/taskiq_clickhouse",
+    "tests",
+]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+warn_unused_configs = true
+pretty = true
+show_error_codes = true
+
+[tool.typos.default.extend-words]
+taskiq = "taskiq"
+
+[tool.typos.files]
+extend-exclude = [".gitignore"]
