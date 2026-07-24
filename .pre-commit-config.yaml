@@ -1,12 +1,4 @@
 repos:
-  - repo: local
-    hooks:
-      - id: check-all-position
-        name: check __all__ position
-        entry: python scripts/check_all_position.py
-        language: python
-        types: [python]
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -30,8 +22,6 @@ repos:
       - id: fix-byte-order-marker
       - id: mixed-line-ending
         args: [--fix=lf]
-      - id: name-tests-test
-        args: [--pytest-test-first]
       - id: pretty-format-json
         args:
           - --autofix
@@ -54,26 +44,36 @@ repos:
       - id: uv-lock
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.21
+    rev: v0.15.20
     hooks:
-      - id: ruff-check
-        args: [--fix]
       - id: ruff-format
+      - id: ruff-check
+        args: [--fix, --unsafe-fixes]
 
   - repo: https://github.com/pycqa/flake8
     rev: "7.3.0"
     hooks:
       - id: flake8
+        args: [src/taskiq_clickhouse]
         additional_dependencies:
           - wemake-python-styleguide==1.6.2
-        files: ^src/taskiq_clickhouse/.*\.py$
+        files: ^(?:\.flake8|src/taskiq_clickhouse/.*\.py)$
+        pass_filenames: false
+        types: [file]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.0
     hooks:
       - id: mypy
         additional_dependencies:
-          - "clickhouse-connect[async]>=1.4.2,<2"
-          - "taskiq>=0.12.4,<1"
+          - "clickhouse-connect[async]==1.4.2"
+          - "factory-boy==3.3.3"
+          - "faker==40.35.0"
+          - "pydantic==2.13.4"
+          - "pytest-asyncio==1.4.0"
+          - "pytest==9.1.1"
+          - "taskiq==0.12.4"
         args: [--config-file=pyproject.toml]
-        files: ^(src/taskiq_clickhouse|tests)/.*\.pyi?$
+        files: ^(?:pyproject\.toml|(?:docs/examples|src/taskiq_clickhouse|tests)/.*\.pyi?)$
+        pass_filenames: false
+        types: [file]

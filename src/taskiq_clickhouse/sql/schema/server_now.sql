@@ -1,0 +1,1 @@
+SELECT now64(6, 'UTC')

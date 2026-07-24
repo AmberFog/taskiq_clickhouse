@@ -1,0 +1,397 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  quality:
+    name: Quality and unit contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Validate workflow
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro" -w /repo
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -color
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          cache-dependency-glob: uv.lock
+          enable-cache: true
+          version: 0.11.28
+
+      - name: Validate lockfile
+        run: uv lock --check
+
+      - name: Run pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Run unit and contract tests
+        run: uv run pytest --cov=taskiq_clickhouse --cov-report=term-missing
+
+  package:
+    name: Build and install package
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          cache-dependency-glob: uv.lock
+          enable-cache: true
+          version: 0.11.28
+
+      - name: Build distributions
+        run: uv build --no-sources
+
+      - name: Install and smoke-test the wheel outside the checkout
+        run: |
+          mapfile -t wheels < <(find dist -maxdepth 1 -type f -name 'taskiq_clickhouse-*.whl' -print)
+          mapfile -t sdists < <(find dist -maxdepth 1 -type f -name 'taskiq_clickhouse-*.tar.gz' -print)
+          test "${#wheels[@]}" -eq 1
+          test "${#sdists[@]}" -eq 1
+
+          smoke_root="$RUNNER_TEMP/package-smoke"
+          venv_root="$smoke_root/.venv"
+          uv venv --python "$(cat .python-version)" "$venv_root"
+          uv pip install --python "$venv_root/bin/python" "${wheels[0]}"
+
+          EXPECTED_VERSION="$(uv version --short)"
+          export EXPECTED_VERSION
+          export PROJECT_ROOT="$GITHUB_WORKSPACE"
+          SDIST_PATH="$(realpath "${sdists[0]}")"
+          export SDIST_PATH
+          export VENV_ROOT="$venv_root"
+          WHEEL_PATH="$(realpath "${wheels[0]}")"
+          export WHEEL_PATH
+          cd "$smoke_root"
+          "$venv_root/bin/python" -I - <<'PY'
+          import os
+          from email import policy
+          from email.parser import BytesParser
+          from importlib import metadata, resources
+          from pathlib import Path
+          import tarfile
+          import tomllib
+          import zipfile
+
+          import taskiq_clickhouse
+
+          project_root = Path(os.environ["PROJECT_ROOT"])
+          project = tomllib.loads(
+              project_root.joinpath("pyproject.toml").read_text(encoding="utf-8"),
+          )["project"]
+          version = os.environ["EXPECTED_VERSION"]
+          wheel_path = Path(os.environ["WHEEL_PATH"])
+          sdist_path = Path(os.environ["SDIST_PATH"])
+          module_path = Path(taskiq_clickhouse.__file__).resolve()
+          venv_root = Path(os.environ["VENV_ROOT"]).resolve()
+          expected_sql = {
+              path.relative_to(project_root / "src").as_posix()
+              for path in project_root.glob("src/taskiq_clickhouse/sql/**/*.sql")
+          }
+
+          def require_metadata(message):
+              assert message["Name"] == project["name"]
+              assert message["Version"] == project["version"]
+              assert message["Summary"] == project["description"]
+              assert message["Requires-Python"] == project["requires-python"]
+              assert message["License-Expression"] == project["license"]
+              assert message.get_all("License-File") == project["license-files"]
+              assert message.get_all("Classifier") == project["classifiers"]
+              assert message.get_all("Requires-Dist") == project["dependencies"]
+              assert message.get_payload().startswith("# taskiq-clickhouse")
+
+          assert wheel_path.name == f"taskiq_clickhouse-{version}-py3-none-any.whl"
+          with zipfile.ZipFile(wheel_path) as wheel:
+              wheel_names = set(wheel.namelist())
+              metadata_names = tuple(
+                  name for name in wheel_names if name.endswith(".dist-info/METADATA")
+              )
+              assert len(metadata_names) == 1
+              dist_info_prefix = metadata_names[0].removesuffix("METADATA")
+              assert all(
+                  name.startswith("taskiq_clickhouse/") or name.startswith(dist_info_prefix)
+                  for name in wheel_names
+              )
+              wheel_metadata = BytesParser(policy=policy.default).parsebytes(
+                  wheel.read(metadata_names[0]),
+              )
+              require_metadata(wheel_metadata)
+              assert "taskiq_clickhouse/py.typed" in wheel_names
+              assert sum(name.endswith(".dist-info/licenses/LICENSE") for name in wheel_names) == 1
+              wheel_sql = {
+                  name
+                  for name in wheel_names
+                  if name.startswith("taskiq_clickhouse/sql/") and name.endswith(".sql")
+              }
+              assert wheel_sql == expected_sql
+
+          sdist_root = f"taskiq_clickhouse-{version}"
+          assert sdist_path.name == f"{sdist_root}.tar.gz"
+          with tarfile.open(sdist_path, "r:gz") as sdist:
+              sdist_names = set(sdist.getnames())
+              allowed_sdist_entries = {
+                  sdist_root,
+                  f"{sdist_root}/LICENSE",
+                  f"{sdist_root}/PKG-INFO",
+                  f"{sdist_root}/README.md",
+                  f"{sdist_root}/pyproject.toml",
+                  f"{sdist_root}/src",
+                  f"{sdist_root}/src/taskiq_clickhouse",
+              }
+              assert all(
+                  name in allowed_sdist_entries
+                  or name.startswith(f"{sdist_root}/src/taskiq_clickhouse/")
+                  for name in sdist_names
+              )
+              pkg_info = sdist.extractfile(f"{sdist_root}/PKG-INFO")
+              assert pkg_info is not None
+              require_metadata(BytesParser(policy=policy.default).parse(pkg_info))
+              assert {
+                  f"{sdist_root}/LICENSE",
+                  f"{sdist_root}/README.md",
+                  f"{sdist_root}/pyproject.toml",
+                  f"{sdist_root}/src/taskiq_clickhouse/py.typed",
+              } <= sdist_names
+              assert {
+                  name.removeprefix(f"{sdist_root}/src/")
+                  for name in sdist_names
+                  if name.startswith(f"{sdist_root}/src/taskiq_clickhouse/sql/") and name.endswith(".sql")
+              } == expected_sql
+
+          assert module_path.is_relative_to(venv_root)
+          distribution = metadata.distribution("taskiq-clickhouse")
+          assert distribution.version == version
+          require_metadata(distribution.metadata)
+          package = resources.files(taskiq_clickhouse)
+          assert package.joinpath("py.typed").is_file()
+          for sql_path in expected_sql:
+              assert package.joinpath(*Path(sql_path).parts[1:]).is_file()
+          PY
+          "$venv_root/bin/taskiq-clickhouse-schema" --help
+
+  compatibility:
+    name: Compatibility (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: py311-minimum
+            python: "3.11"
+            taskiq: taskiq==0.12.4
+            pydantic: pydantic==2.7.0
+          - name: py311-current
+            python: "3.11"
+            taskiq: taskiq>=0.12.4,<1
+            pydantic: pydantic>=2.7,<3
+          - name: py312-current
+            python: "3.12"
+            taskiq: taskiq>=0.12.4,<1
+            pydantic: pydantic>=2.7,<3
+          - name: py313-current
+            python: "3.13"
+            taskiq: taskiq>=0.12.4,<1
+            pydantic: pydantic>=2.7,<3
+          - name: py314-current
+            python: "3.14"
+            taskiq: taskiq>=0.12.4,<1
+            pydantic: pydantic>=2.7,<3
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          version: 0.11.28
+
+      - name: Run compatibility contracts
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+          PYDANTIC_REQUIREMENT: ${{ matrix.pydantic }}
+          TASKIQ_REQUIREMENT: ${{ matrix.taskiq }}
+        run: |
+          uv run --isolated --no-project --no-sources --no-config --no-env-file \
+            --python "$PYTHON_VERSION" \
+            --default-index https://pypi.org/simple --resolution highest \
+            --with . \
+            --with "$TASKIQ_REQUIREMENT" \
+            --with "$PYDANTIC_REQUIREMENT" \
+            --with 'factory-boy>=3.3,<4' \
+            --with 'faker>=40,<41' \
+            --with 'pytest>=9,<10' \
+            --with 'pytest-asyncio>=1,<2' \
+            --with 'pytest-timeout>=2,<3' \
+            python -m pytest -c pyproject.toml --rootdir . -p no:cacheprovider \
+            tests/test_backend.py \
+            tests/test_backend_progress.py \
+            tests/test_progress_serialization.py \
+            tests/test_serialization.py \
+            tests/result_contract \
+            tests/taskiq_boundary \
+            -q
+
+  clickhouse:
+    name: ClickHouse (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: minimum-server-minimum-client
+            profile: minimum
+            client: clickhouse-connect[async]==1.4.2
+            image: clickhouse/clickhouse-server:25.8.28.1@sha256:a9d328123ff8a61bf6b16448528b577d59deb85758172e13b09054b0727f8adf
+            expected_version: 25.8.28.1
+            expected_async_insert: "0"
+          - name: minimum-server-current-client
+            profile: minimum
+            client: clickhouse-connect[async]>=1.4.2,<2
+            image: clickhouse/clickhouse-server:25.8.28.1@sha256:a9d328123ff8a61bf6b16448528b577d59deb85758172e13b09054b0727f8adf
+            expected_version: 25.8.28.1
+            expected_async_insert: "0"
+          - name: current-server-minimum-client
+            profile: current
+            client: clickhouse-connect[async]==1.4.2
+            image: clickhouse/clickhouse-server:26.6.1.1193@sha256:1d1f6508eba2dccce2cee9913907c5f7766327debc57a6b1991f2c9e3176c163
+            expected_version: 26.6.1.1193
+            expected_async_insert: "1"
+          - name: current-server-current-client
+            profile: current
+            client: clickhouse-connect[async]>=1.4.2,<2
+            image: clickhouse/clickhouse-server:26.6.1.1193@sha256:1d1f6508eba2dccce2cee9913907c5f7766327debc57a6b1991f2c9e3176c163
+            expected_version: 26.6.1.1193
+            expected_async_insert: "1"
+    services:
+      clickhouse:
+        image: ${{ matrix.image }}
+        env:
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+          CLICKHOUSE_PASSWORD: taskiq_test # pragma: allowlist secret
+          CLICKHOUSE_USER: taskiq
+          TZ: UTC
+        ports:
+          - 8123/tcp
+        options: >-
+          --init
+          --health-cmd "clickhouse-client --user taskiq --password taskiq_test --query 'SELECT 1'"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 60
+          --health-start-period 10s
+          --cpus 2
+          --memory 2g
+          --pids-limit 1024
+          --ulimit nofile=262144:262144
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          version: 0.11.28
+
+      - name: Run real ClickHouse contracts
+        env:
+          CLIENT_REQUIREMENT: ${{ matrix.client }}
+          TASKIQ_CLICKHOUSE_EVIDENCE_DIR: ${{ github.workspace }}/.test-artifacts/clickhouse-${{ matrix.name }}
+          TASKIQ_CLICKHOUSE_EXPECTED_ASYNC_INSERT: ${{ matrix.expected_async_insert }}
+          TASKIQ_CLICKHOUSE_EXPECTED_VERSION: ${{ matrix.expected_version }}
+          TASKIQ_CLICKHOUSE_HOST: 127.0.0.1
+          TASKIQ_CLICKHOUSE_PASSWORD: taskiq_test # pragma: allowlist secret
+          TASKIQ_CLICKHOUSE_PORT: ${{ job.services.clickhouse.ports['8123'] }}
+          TASKIQ_CLICKHOUSE_PROFILE: ${{ matrix.profile }}
+          TASKIQ_CLICKHOUSE_USER: taskiq
+        run: |
+          uv run --isolated --no-project --no-sources --no-config --no-env-file \
+            --default-index https://pypi.org/simple --resolution highest \
+            --with . \
+            --with "$CLIENT_REQUIREMENT" \
+            --with 'pytest>=9,<10' \
+            --with 'pytest-asyncio>=1,<2' \
+            --with 'pytest-timeout>=2,<3' \
+            bash -eu -o pipefail <<'CLICKHOUSE_TESTS'
+          expected_client_version="$(
+            python -c 'from importlib.metadata import version; print(version("clickhouse-connect"))'
+          )"
+          export TASKIQ_CLICKHOUSE_EXPECTED_CLIENT_VERSION="$expected_client_version"
+          exec python -m pytest -c pyproject.toml --rootdir . -p no:cacheprovider \
+            tests/integration -m clickhouse --clickhouse-required
+          CLICKHOUSE_TESTS
+
+  gate:
+    name: Required gate
+    if: ${{ always() }}
+    needs:
+      - quality
+      - package
+      - compatibility
+      - clickhouse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job
+        run: |
+          test "${{ needs.quality.result }}" = success
+          test "${{ needs.package.result }}" = success
+          test "${{ needs.compatibility.result }}" = success
+          test "${{ needs.clickhouse.result }}" = success

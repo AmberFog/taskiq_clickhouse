@@ -1,15 +1,15 @@
 [build-system]
 requires = [
-    "uv_build>=0.11.28,<0.12",
+    "uv_build==0.11.28",
 ]
 build-backend = "uv_build"
 
 [project]
 name = "taskiq-clickhouse"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "ClickHouse result backend for Taskiq."
 readme = "README.md"
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -26,7 +26,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -40,29 +39,41 @@ classifiers = [
 ]
 dependencies = [
     "clickhouse-connect[async]>=1.4.2,<2",
+    "pydantic>=2.7,<3",
     "taskiq>=0.12.4,<1",
 ]
 
 [project.urls]
+Documentation = "https://github.com/AmberFog/taskiq_clickhouse/blob/main/docs/user-guide.md"
 Homepage = "https://github.com/AmberFog/taskiq_clickhouse"
 Issues = "https://github.com/AmberFog/taskiq_clickhouse/issues"
 Repository = "https://github.com/AmberFog/taskiq_clickhouse"
 
+[project.scripts]
+taskiq-clickhouse-schema = "taskiq_clickhouse._cli:main"
+
 [dependency-groups]
 dev = [
     "coverage[toml]>=7,<8",
+    "factory-boy>=3.3,<4",
+    "faker>=40,<41",
+    "flake8>=7.3,<8",
     "mypy>=2.1,<3",
     "pre-commit>=4,<5",
     "pytest>=9,<10",
     "pytest-asyncio>=1,<2",
     "pytest-cov>=7,<8",
     "pytest-timeout>=2,<3",
-    "ruff>=0.15,<0.16",
+    "ruff==0.15.20",
     "wemake-python-styleguide>=1.6,<2",
 ]
 
 [tool.pytest.ini_options]
 addopts = [
+    "-p",
+    "no:anyio",
+    "-m",
+    "not clickhouse",
     "--strict-config",
     "--strict-markers",
     "-ra",
@@ -70,11 +81,26 @@ addopts = [
 asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
 asyncio_mode = "strict"
+markers = [
+    "clickhouse: requires an explicit real ClickHouse service",
+]
+required_plugins = [
+    "pytest-asyncio>=1,<2",
+    "pytest-timeout>=2,<3",
+]
 testpaths = ["tests"]
+timeout = 20
+timeout_method = "thread"
 xfail_strict = true
 
 [tool.coverage.run]
 branch = true
+# These modules contain consumer-owned static Protocol declarations only;
+# runtime behavior is exercised through their concrete structural implementations.
+omit = [
+    "*/taskiq_clickhouse/_progress_ports.py",
+    "*/taskiq_clickhouse/_result_ports.py",
+]
 source = ["taskiq_clickhouse"]
 
 [tool.coverage.report]
@@ -84,6 +110,7 @@ skip_covered = true
 
 [tool.mypy]
 files = [
+    "docs/examples",
     "src/taskiq_clickhouse",
     "tests",
 ]
@@ -98,4 +125,6 @@ show_error_codes = true
 taskiq = "taskiq"
 
 [tool.typos.files]
-extend-exclude = [".gitignore"]
+extend-exclude = [
+    ".gitignore",
+]

@@ -20,4 +20,29 @@ exclude =
 
 per-file-ignores =
     # The root initializer defines the explicit public API metadata.
-    src/taskiq_clickhouse/__init__.py: WPS410, WPS412
+    src/taskiq_clickhouse/__init__.py: WPS235, WPS410, WPS412
+    # Public exception taxonomy is intentionally exhaustive and explicitly exported.
+    # Taskiq's dataclass_transform makes explicit typed subtype constructors necessary
+    # for mypy even though each one delegates identically to the validated base.
+    src/taskiq_clickhouse/exceptions.py: WPS202, WPS204, WPS410, WPS612
+    # These modules are explicit, stable API boundaries.
+    src/taskiq_clickhouse/_types.py: WPS410
+    src/taskiq_clickhouse/_identifiers.py: WPS110, WPS410
+    # The composition root intentionally names every wired runtime collaborator.
+    src/taskiq_clickhouse/_backend_composition.py: WPS201
+    # These cohesive state machines keep their transitions and typed failure policy together.
+    src/taskiq_clickhouse/_backend_runtime.py: WPS201
+    src/taskiq_clickhouse/_schema/runner.py: WPS201
+    # The storage facade wires focused repositories while preserving type-only boundary imports.
+    src/taskiq_clickhouse/_storage/repository.py: WPS201
+    # Public facade modules explicitly freeze their supported import surfaces.
+    # Taskiq's concrete backend necessarily implements all lifecycle/result/progress methods.
+    src/taskiq_clickhouse/backend.py: WPS201, WPS214, WPS410
+    src/taskiq_clickhouse/receiver.py: WPS410
+    src/taskiq_clickhouse/schema.py: WPS410
+    # Public error decorators deliberately nest signature-preserving wrappers and delete
+    # raw arguments before re-raising; duplicating the sync/async security paths is explicit.
+    src/taskiq_clickhouse/_public_error_boundary.py: WPS232, WPS420, WPS430
+    # The serializer boundary owns three explicit outcomes: value, hook failure and
+    # executor unavailability. Keeping the finite taxonomy together avoids false corruption.
+    src/taskiq_clickhouse/_serializer_boundary.py: WPS202, WPS231
